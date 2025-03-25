@@ -1,6 +1,5 @@
 import subprocess
 import pandas as pd
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -13,8 +12,8 @@ import json
 
 # Setup and initial configurations
 URL = "https://www.google.com/maps"
-service = "ENTER A SERVICE OR A NAME"  # e.g. catering, events, etc. OR starbucks, mcdonalds, etc.
-location = "ENTER LOCATION"  # e.g. London, Germany, etc.
+service = "SERVICE"  # e.g. catering, events, etc.
+location = "LOCATION"  # e.g. London, Germany, etc.
 
 print("Starting the web scraping script...")
 
@@ -27,112 +26,120 @@ driver.get(URL)
 # Accept cookies
 try:
     print("Looking for accept cookies button...")
-    accept_cookies = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="yDmH0d"]/c-wiz/div/div/div/div[2]/div[1]/div[3]/div[1]/div[1]/form[2]/div/div/button')))
+    accept_cookies = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, '//*[@id="yDmH0d"]/c-wiz/div/div/div/div[2]/div[1]/div[3]/div[1]/div[1]/form[2]/div/div/button'))
+    )
     accept_cookies.click()
     print("Accepted cookies.")
-except NoSuchElementException:
-    print("No accept cookies button found.")
+except Exception:
+    print("No accept cookies button found or already accepted.")
 
 # Search for results
 print(f"Searching for: {service} in {location}")
-input_field = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH, '//*[@id="searchboxinput"]')))
-input_field.send_keys(service.lower() + ' ' + location.lower())
+input_field = WebDriverWait(driver, 10).until(
+    EC.element_to_be_clickable((By.XPATH, '//*[@id="searchboxinput"]'))
+)
+input_field.send_keys(f"{service} {location}")
 input_field.send_keys(Keys.ENTER)
 print("Search submitted.")
 
-# Wait for the sidebar to load
-print("Waiting for the sidebar to load...")
-divSideBar = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR, f"div[aria-label*='{service.lower()} {location.lower()}']")))
+# Wait for results to load
+time.sleep(5)
 
-# Scroll through the results
-print("Scrolling the sidebar to load all of the results...")
-previous_scroll_height = driver.execute_script("return arguments[0].scrollHeight", divSideBar)
+# Scroll and collect clickable result cards
+print("Scrolling to load all business listings...")
+scrollable_div_xpath = '//div[@role="feed"]'
+scrollable_div = WebDriverWait(driver, 10).until(
+    EC.presence_of_element_located((By.XPATH, scrollable_div_xpath))
+)
+
+last_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
 while True:
-    driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", divSideBar)
-    time.sleep(3)
-    new_scroll_height = driver.execute_script("return arguments[0].scrollHeight", divSideBar)
-    if new_scroll_height == previous_scroll_height:
+    driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", scrollable_div)
+    time.sleep(2)
+    new_height = driver.execute_script("return arguments[0].scrollHeight", scrollable_div)
+    if new_height == last_height:
         break
-    previous_scroll_height = new_scroll_height
-print("Finished scrolling.")
+    last_height = new_height
 
-# Parse the page source
-print("Parsing the page source...")
-page_source = driver.page_source
-driver.quit()
+print("Finished scrolling. Collecting business profiles...")
+business_cards = driver.find_elements(By.CLASS_NAME, "Nv2PK")
 
-soup = BeautifulSoup(page_source, "html.parser")
-boxes = soup.find_all('div', class_='Nv2PK')
-
-# Collect data
-print("Collecting data...")
 data = []
 
-for box in boxes:
-    # Business name
+for i, card in enumerate(business_cards):
     try:
-        business_name = box.find('div', class_='qBF1Pd').getText()
-    except AttributeError:
-        business_name = "N/A"
+        print(f"Processing business {i+1}/{len(business_cards)}")
+        driver.execute_script("arguments[0].scrollIntoView();", card)
+        time.sleep(1)
+        card.click()
+        time.sleep(3)  # Let the profile panel load
 
-    # Address
-    try:
-        inner_div = box.find_all('div', class_='W4Efsd')[1].find('div', class_='W4Efsd')
-        address = [span.text for span in inner_div.find_all('span') if span.text and not span.find('span')][-1]
-    except (IndexError, AttributeError):
-        address = "N/A"
+        # Collect business data from the profile panel
+        try:
+            name = driver.find_element(By.CLASS_NAME, "DUwDvf").text
+        except:
+            name = "N/A"
 
-    # Stars
-    try:
-        stars = box.find('span', class_='MW4etd').getText()
-    except AttributeError:
-        stars = "N/A"
+        try:
+            address = driver.find_element(By.XPATH, "//button[contains(@data-item-id, 'address')]//div[2]/div[1]").text
+        except:
+            address = "N/A"
 
-    # Number of reviews
-    try:
-        number_of_reviews = box.find('span', class_='UY7F9').getText().strip('()')
-    except AttributeError:
-        number_of_reviews = "N/A"
+        try:
+            phone = driver.find_element(By.XPATH, "//button[contains(@data-item-id, 'phone')]//div[2]/div[1]").text
+        except:
+            phone = "N/A"
 
-    # Phone number
-    try:
-        phone_number = box.find('span', class_='UsdlK').getText()
-    except AttributeError:
-        phone_number = "N/A"
+        try:
+            website = driver.find_element(By.XPATH, "//a[contains(@data-item-id, 'authority')]" ).get_attribute("href")
+        except:
+            website = "N/A"
 
-    # Website
-    try:
-        website = box.find('a', class_='lcr4fd').get('href')
-    except AttributeError:
-        website = "N/A"
+        try:
+            stars = driver.find_element(By.CLASS_NAME, "F7nice").text
+        except:
+            stars = "N/A"
 
-    # Append to data list
-    data.append({
-        'Business Name': business_name,
-        'Address': address,
-        'Stars': stars,
-        'Number of Reviews': number_of_reviews,
-        'Phone Number': phone_number,
-        'Website': website,
-        'Email': ' ',
-    })
+        try:
+            reviews = driver.find_element(By.CLASS_NAME, "UY7F9").text.strip("()")
+        except:
+            reviews = "N/A"
 
-# Create a DataFrame and save to Excel
+        data.append({
+            'Business Name': name,
+            'Address': address,
+            'Stars': stars,
+            'Number of Reviews': reviews,
+            'Phone Number': phone,
+            'Website': website,
+            'Email': ' ',
+        })
+
+        # Back to the results panel
+        time.sleep(2)
+        back_button = driver.find_element(By.CLASS_NAME, "RVQdVd")
+        if back_button:
+            back_button.click()
+            time.sleep(2)
+
+    except Exception as e:
+        print(f"Error processing card {i+1}: {e}")
+        continue
+
+# Save to Excel
 excel_file = f'{location}_{service}.xlsx'
 df = pd.DataFrame(data)
 df.to_excel(excel_file, index=False)
 
 print(f"Data has been saved to {excel_file}")
 
-# Create a configuration file
-config = {
-    'excel_file': excel_file
-}
+# Save config
 with open('config.json', 'w') as config_file:
-    json.dump(config, config_file)
+    json.dump({ 'excel_file': excel_file }, config_file)
 print("Configuration file created: config.json")
 
-# Call the email extraction script
+# Run the email extraction script
 print("Calling the email extraction script...")
 subprocess.run(['python', 'email_extraction_script.py'])
 print("Email extraction script completed.")
